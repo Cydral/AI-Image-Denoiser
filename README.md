@@ -1,6 +1,7 @@
 # AI Image Denoiser
 <p><i>Welcome to the AI Image Denoiser project, an innovative deep learning solution for image noise reduction and automatic image remastering. This project leverages a custom deep neural network (DNN) model, built using the powerful Dlib library for image processing and AI.</i></p>
 <p><i>Our model is capable of removing various types of noise and grain from images and can even be used for automatic video stream remastering, thanks to its integration with the latest FFMPEG-based functionalities in the Dlib library.</i></p>
+<p align="center"><img src="https://github.com/Cydral/AI-Image-Denoiser/blob/main/dnn_denoising_sample.jpg" alt="Denoised images during the training process"></p>
 
 <h2>Description</h2>
 <p>The AI Image Denoiser model is inspired by the "Pix2Pix" principle and employs a neural architecture that combines a U-Net structure and a ResNet-style neural typology. It excels in processing artificially noised images, supporting three noise types: flow, occlusion, and Gaussian noise. The model processes the input image and produces an enhanced, noise-reduced output. While it currently operates on grayscale images, adapting it for color images is a straightforward extension.</p>
