@@ -30,10 +30,6 @@ namespace fs = std::filesystem;
 using net_backbone = generator_backbone<input<matrix<gray_pixel>>>;
 using net_type = loss_multiclass_log_per_pixel<cont<256, 1, 1, 1, 1, net_backbone>>;
 
-struct current_state {
-    chrono::time_point<chrono::system_clock> first_run_time;
-    chrono::time_point<chrono::system_clock> last_run_time;
-};
 struct training_sample {
     matrix<rgb_pixel> source_image;
     matrix<gray_pixel> input_image;
@@ -161,8 +157,8 @@ BOOL WINAPI CtrlHandler(DWORD ctrlType) {
 
 // ----------------------------------------------------------------------------------------
 int main(int argc, char** argv) try {
-    const long update_display = 20;
-    const long max_minutes_elapsed = 8;
+    const long update_display = 25;
+    const long max_minutes_elapsed = 10;
     double initial_learning_rate = 1e-1;
     size_t minibatch_size = 20, patience = 10000;
 
@@ -192,19 +188,17 @@ int main(int argc, char** argv) try {
         const string input_dir = vm["train"].as<string>();
         const std::vector<file> training_images = dlib::get_files_in_directory_tree(input_dir, dlib::match_endings(".jpg .JPG .jpeg .JPEG"));
         if (training_images.size() == 0) {
-            std::cout << "Didn't find images for the training dataset" << endl;
+            cout << "Didn't find images for the training dataset" << endl;
             return EXIT_FAILURE;
         }
-        current_state state;
-        state.first_run_time = chrono::system_clock::now();
-        state.last_run_time = state.first_run_time;
 
-        // Instantiate the model        
-        const string model_name = "dnn_bw_denoising_filter.dnn";
+        // Instantiate the model
+        const string model_sync_filename = fs::current_path().string() + "/dnn_bw_denoising_filter.sync";   
+        const string model_name = fs::current_path().string() + "/dnn_bw_denoising_filter.dnn";
         net_type my_net;
         if (file_exists(model_name)) deserialize(model_name) >> my_net;
 
-        const double min_learning_rate = 1e-5;
+        const double min_learning_rate = 1e-4;
         const double weight_decay = 1e-4;
         const double momentum = 0.9;
 
@@ -214,6 +208,7 @@ int main(int argc, char** argv) try {
         trainer.set_learning_rate_shrink_factor(0.1);
         trainer.set_mini_batch_size(minibatch_size);
         trainer.set_iterations_without_progress_threshold(patience);
+        trainer.set_synchronization_file(model_sync_filename, std::chrono::minutes(max_minutes_elapsed));
         trainer.set_min_learning_rate(min_learning_rate);
         trainer.be_verbose();
         set_all_bn_running_stats_window_sizes(my_net, 1000);
@@ -222,19 +217,21 @@ int main(int argc, char** argv) try {
 
         // Output training parameters
         training_sample sample;
-        const auto& image_info = training_images[rnd.get_random_32bit_number() % training_images.size()];
         matrix<rgb_pixel> input_image;
-        load_image(input_image, image_info.full_name());
-        randomly_crop_image(input_image, sample, rnd);
-        my_net(sample.input_image);
-        std::cout << my_net << std::endl;
-        std::cout << "The network has " << my_net.num_layers << " layers in it" << std::endl;
-        std::cout << std::endl << trainer << std::endl;       
+        try {
+            const auto& image_info = training_images[rnd.get_random_32bit_number() % training_images.size()];
+            load_image(input_image, image_info.full_name());
+            randomly_crop_image(input_image, sample, rnd);
+            my_net(sample.input_image);
+            cout << my_net << std::endl;
+            cout << "The network has " << my_net.num_layers << " layers in it" << std::endl;
+            cout << std::endl << trainer << std::endl;
+        } catch(...) {}        
         // Total images in the dataset
-        std::cout << "images in dataset: " << training_images.size() << endl;
+        cout << "images in dataset: " << training_images.size() << endl;
 
         // Use some threads to preload images
-        dlib::pipe<training_sample> data(minibatch_size);
+        dlib::pipe<training_sample> data(minibatch_size * 2);
         auto f = [&data, &training_images](time_t seed) {
             dlib::rand rnd(time(nullptr) + seed);
             matrix<rgb_pixel> input_image;
@@ -253,9 +250,9 @@ int main(int argc, char** argv) try {
         std::thread data_loader1([f]() { f(1); });
         std::thread data_loader2([f]() { f(2); });
         std::thread data_loader3([f]() { f(3); });
-        std::cout << "Waiting for the initial pipe loading... ";
-        while (data.size() < minibatch_size) std::this_thread::sleep_for(std::chrono::seconds(1));
-        std::cout << "done" << std::endl;
+        cout << "Waiting for the initial pipe loading... ";
+        while (data.size() < (minibatch_size * 2)) std::this_thread::sleep_for(std::chrono::seconds(1));
+        cout << "done" << endl;
         
         std::vector<matrix<rgb_pixel>> sources;
         std::vector<matrix<gray_pixel>> samples;
@@ -294,25 +291,12 @@ int main(int argc, char** argv) try {
             }
             trainer.train_one_step(samples, labels);
             cur_learning_rate = trainer.get_learning_rate();
-            
-            // Check if the model has to be saved
-            if (iteration % 200 == 0) {
-                chrono::time_point<chrono::system_clock> current_time = chrono::system_clock::now();
-                double minutes_elapsed = chrono::duration_cast<chrono::minutes>(current_time - state.last_run_time).count();
-                if (minutes_elapsed >= max_minutes_elapsed) {
-                    trainer.get_net(dlib::force_flush_to_disk::no);
-                    my_net.clean();
-                    serialize(model_name) << my_net;
-                    cout << "checkpoint#:\tModel <" << model_name << "> saved on disk" << endl;
-                    state.last_run_time = current_time;
-                }
-            }
         }
         data.disable();
         data_loader1.join();
         data_loader2.join();
         data_loader3.join();
-        trainer.get_net(dlib::force_flush_to_disk::no);
+        trainer.get_net();
         my_net.clean();
         serialize(model_name) << my_net;
     } else if (vm.count("test")) {
@@ -320,18 +304,18 @@ int main(int argc, char** argv) try {
         std::vector<string> images;
         if (!is_directory(input_dir)) images.push_back(input_dir);
         else parse_directory(input_dir, images);        
-        std::cout << "total images to apply the denoising filter: " << images.size() << endl;
+        cout << "total images to apply the denoising filter: " << images.size() << endl;
         if (images.size() == 0) {
-            std::cout << "Didn't find images to colorify" << endl;
+            cout << "Didn't find images to colorify" << endl;
             return EXIT_FAILURE;
         }
 
         // Load the mode
-        const string model_name = "dnn_bw_denoising_filter.dnn";
+        const string model_name = fs::current_path().string() + "/dnn_bw_denoising_filter.dnn";
         net_type my_net;
         if (file_exists(model_name)) deserialize(model_name) >> my_net;
         else {
-            std::cout << "Didn't find the precomputed model: " << model_name << endl;
+            cout << "Didn't find the precomputed model: " << model_name << endl;
             return EXIT_FAILURE;
         }       
 
@@ -361,11 +345,11 @@ int main(int argc, char** argv) try {
             win.set_title("AI-DENOISING - Original (grayscale) " + to_string(display_gray_image.nc()) + "x" + to_string(display_gray_image.nr()) + ") | Generated (" + to_string(generated_image.nc()) + "x" + to_string(generated_image.nr()) + ")");
             win.set_image(image_to_save);
             save_jpeg(image_to_save, "dnn_bw_denoising_samples.jpg", 95);
-            std::cout << i << " - Hit enter to process the next image or 'q' to quit";
+            cout << i << " - Hit enter to process the next image or 'q' to quit";
             char c = std::cin.get();
             if (c == 'q' || c == 'Q') break;
         }
     }
 } catch (std::exception& e) {
-    std::cout << e.what() << endl;
+    cout << e.what() << endl;
 }
