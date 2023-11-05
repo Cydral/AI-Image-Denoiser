@@ -50,8 +50,11 @@ rectangle make_random_cropping_rect(const matrix<rgb_pixel>& img, dlib::rand& rn
 
 // ----------------------------------------------------------------------------------------
 void add_noise_to_image(const matrix<gray_pixel>& input_image, matrix<gray_pixel>& output_image, dlib::rand& rnd, double noise_prob, double blur_prob, double hole_prob) {
-    if (rnd.get_double_in_range(0.0, 1.0) < blur_prob) gaussian_blur(input_image, output_image, rnd.get_double_in_range(0.8, 1.1));
-    else assign_image(output_image, input_image);
+    bool do_transformation = false;
+    if (rnd.get_double_in_range(0.0, 1.0) < blur_prob) {
+        gaussian_blur(input_image, output_image, rnd.get_double_in_range(0.8, 1.1));
+        do_transformation = true;
+    } else assign_image(output_image, input_image);
     if (rnd.get_double_in_range(0.0, 1.0) < noise_prob) {
         for (long r = 0; r < output_image.nr(); ++r) {
             for (long c = 0; c < output_image.nc(); ++c) {
@@ -62,9 +65,10 @@ void add_noise_to_image(const matrix<gray_pixel>& input_image, matrix<gray_pixel
                 }
             }
         }
+        do_transformation = true;
     }
     if (rnd.get_double_in_range(0.0, 1.0) < hole_prob) {
-        const long nb_rect = rnd.get_integer_in_range(10, 20);
+        const long nb_rect = rnd.get_integer_in_range(10, 27);
         for (long i = 0; i < nb_rect; ++i) {
             long rect_x = rnd.get_random_32bit_number() % output_image.nc();
             long rect_y = rnd.get_random_32bit_number() % output_image.nr();
@@ -81,7 +85,9 @@ void add_noise_to_image(const matrix<gray_pixel>& input_image, matrix<gray_pixel
                 }
             }
         }
+        do_transformation = true;
     }
+    if (!do_transformation) gaussian_blur(input_image, output_image);
 }
 void randomly_crop_image(const matrix<rgb_pixel>& input_image, training_sample& crop, dlib::rand& rnd) {
     const auto rect = make_random_cropping_rect(input_image, rnd);
