@@ -316,7 +316,7 @@ int main(int argc, char** argv) try {
             return EXIT_FAILURE;
         }
 
-        // Load the mode
+        // Load the model
         const string model_name = fs::current_path().string() + "/dnn_bw_denoising_filter.dnn";
         net_type my_net;
         if (file_exists(model_name)) deserialize(model_name) >> my_net;
